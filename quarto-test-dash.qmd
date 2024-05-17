@@ -1,0 +1,292 @@
+---
+title: "Учебный дашборд"
+author: "Ivan Trushin"
+format: 
+  dashboard:
+    # theme: 
+    # - cosmo
+    # - custom.scss
+    # scrolling: true 
+    logo: logo.png
+    nav-buttons: 
+    - icon: gitlab
+      href: https://gitlab.com/
+---
+
+```{r}
+#| label: Загрузка пакетов
+#| message: false
+library(tidyverse)
+library(readxl)
+library(leaflet)
+library(purrr)
+library(gt)
+library(DT)
+library(plotly)
+library(scales)
+library(ggplot2)
+library(ggrepel)
+# Установим тему по умолчанию
+theme_set(theme_minimal(base_size = 24, base_family = "Atkinson Hyperlegible"))
+```
+
+```{r}
+#| label: Загрузка данных
+#| message: false
+pat <- read_excel("data_knime_result.xlsx", sheet = "Пациенты")
+```
+
+<!-- ## {.sidebar} -->
+
+<!-- Sidebar content -->
+
+# Дашборд 
+
+## Row
+
+Данное исследование рассматривало  `{r} nrow(pat)` пациентов из `{r} length(unique(pat$CITYNAME))` городов России и Беларуси
+
+
+## Row 
+
+### Column {width = 50%}
+
+#### Row 
+
+<!-- https://quarto.org/docs/dashboards/data-display.html#value-boxes -->
+```{r}
+#| label: Подсчитаем количество пациентов по полу
+#| message: false
+mens_count <- pat %>% filter(grepl("Мужчины",PAT_GROUP)) %>% nrow()
+womens_count <- pat %>% filter(grepl("Женщины",PAT_GROUP)) %>% nrow()
+children_count <- pat %>% filter(grepl("Дети",PAT_GROUP)) %>% nrow()
+```
+
+```{r}
+#| label: Кол-во мужчин
+#| content: valuebox
+#| title: "Мужчины"
+list(
+  # icon = "person-standing",
+  color = "primary",
+  value = mens_count
+)
+```
+
+```{r}
+#| label: Кол-во женщин
+#| content: valuebox
+#| title: "Женщины"
+list(
+  # icon = "person-standing-dress",
+  color = "info",
+  value = womens_count
+)
+```
+
+```{r}
+#| label: Кол-во детей
+#| content: valuebox
+#| title: "Дети"
+list(
+  # icon = "person-fill",
+  color = "secondary",
+  value = children_count
+)
+```
+
+
+#### Row
+
+```{r}
+#| label: Количество пациентов по городам
+#| 
+all <- pat %>% select(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  group_by(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  summarise(Count = n()) %>% 
+  ungroup()
+men <- pat %>% 
+  filter(grepl("Мужчины",PAT_GROUP)) %>% 
+  select(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  group_by(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  summarise(CountMen = n()) %>% 
+  ungroup()
+women <- pat %>% 
+  filter(grepl("Женщины",PAT_GROUP)) %>% 
+  select(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  group_by(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  summarise(CountWoman = n()) %>% 
+  ungroup()
+children <- pat %>% 
+  filter(grepl("Дети",PAT_GROUP)) %>% 
+  select(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  group_by(CITYNAME, LATITUDE, LONGITUDE) %>% 
+  summarise(CountChild = n()) %>% 
+  ungroup()
+mapdata <- all %>% left_join(men) %>% left_join(women) %>% left_join(children) %>% mutate_all(~replace(., is.na(.), 0))
+
+map <- mapdata %>%  
+  leaflet() %>% 
+  addCircleMarkers(
+    lng = ~ LONGITUDE,
+    lat = ~ LATITUDE,
+    stroke = FALSE,
+    fillOpacity = 0.5,
+    radius = ~ scales::rescale(sqrt(Count), c(1, 10)),
+    label = ~ paste(
+      "<strong>" ,      CITYNAME, ": ", Count,        "</strong>",
+      "<br/>",
+      "Мужчин:", CountMen, "<br/>", 
+      "Женщин:",  CountWoman, "<br/>",
+      "Дети:",  CountChild
+      ) %>% map(html),
+    labelOptions = c(textsize = "15px")) %>% 
+  addTiles("http://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+           )
+map
+```
+
+
+
+### Column {width = 50%}
+
+#### Row
+
+```{r}
+#| label: Диагнозы по группам
+#| title: Структура диагнозов по группам пациентов
+
+diag <- pat %>% group_by(PAT_GROUP, mkb_name) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "PAT_GROUP", values_from = "Count", values_fill = 0)
+
+diag$mkb_name_x <- sapply(diag$mkb_name, 
+                      FUN = function(x) {paste(strwrap(x, width = 24), collapse = "<br>")})
+
+fig <- plot_ly(diag, x = ~mkb_name_x, y = ~`Дети, неосложненные`, type = 'bar', name = 'Дети, неосложненные') %>% 
+add_trace(y = ~`Дети, осложненные`, name = 'Дети, осложненные') %>% 
+add_trace(y = ~`Женщины, неосложненные`, name = 'Женщины, неосложненные') %>% 
+add_trace(y = ~`Женщины, осложненные`, name = 'Женщины, осложненные') %>% 
+add_trace(y = ~`Мужчины, неосложненные`, name = 'Мужчины, неосложненные') %>% 
+add_trace(y = ~`Мужчины, осложненные`, name = 'Мужчины, осложненные') %>% 
+layout(yaxis = list(title = 'Кол-во'), barmode = 'stack') %>% 
+layout(xaxis = list(title = 'Диагноз'))
+fig
+```
+
+#### Row {.tabset}
+
+::: {.card title="Мужчины"}
+```{r}
+#| label: Организмы у мужчин
+
+df1 <- pat %>% 
+  filter(grepl("Мужчины",PAT_GROUP)) %>% 
+  group_by(STRAIN) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  mutate(Percent = round(100 * Count / sum(Count))) %>%
+  arrange(desc(Percent)) %>% 
+   mutate(csum = rev(cumsum(rev(Count))), 
+         pos = Count/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), Count/2, pos))
+
+ggplot(df1, aes(x = "" , y = Count, fill = fct_inorder(STRAIN))) +
+  geom_col(width = 1, color = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_label_repel(data = df1,
+                   aes(y = pos, label = paste0(Count, " (", Percent, "%)")),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  guides(fill = guide_legend(title = "Организм")) +
+  theme_void()
+```
+:::
+
+::: {.card title="Женщины"}
+
+```{r}
+#| label: Организмы у женщин
+
+df2 <- pat %>% 
+  filter(grepl("Женщины",PAT_GROUP)) %>% 
+  group_by(STRAIN) %>% 
+  summarise(Count = n()) %>% 
+  ungroup() %>% 
+  mutate(Percent = round(100 * Count / sum(Count))) %>%
+  arrange(desc(Percent)) %>% 
+   mutate(csum = rev(cumsum(rev(Count))), 
+         pos = Count/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), Count/2, pos))
+
+ggplot(df2, aes(x = "" , y = Count, fill = fct_inorder(STRAIN))) +
+  geom_col(width = 1, color = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_label_repel(data = df2,
+                   aes(y = pos, label = paste0(Count, " (", Percent, "%)")),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  guides(fill = guide_legend(title = "Организм")) +
+  theme_void()
+
+```
+:::
+
+# Распределение пациентов по городам
+
+```{r}
+#| label: Подсчитаем количество пациентов по городам
+#| message: false
+citypat <- pat %>% group_by(CITYNAME, PAT_GROUP) %>% summarise(Count = n()) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "PAT_GROUP", values_from = "Count", values_fill = 0) %>% 
+  select(order(colnames(.)))
+colnames(citypat)[1] <- "Город"
+
+```
+
+## Row {width = 50%}
+
+::: {.card title="Kable"}
+```{r}
+#| label: Вывод таблицы kable
+knitr::kable(citypat)
+```
+::: 
+
+## Row {width = 50%}
+
+::: {.card title="Gt"}
+```{r}
+#| label: Вывод таблицы gt
+citypat %>% 
+  gt() %>% 
+  tab_header(
+    title = "Распределение пациентов по городам",
+    subtitle = "с разбиением по группам"
+  ) 
+```
+:::
+
+
+# Набор данных
+
+```{r}
+#| label: Динамическая таблица
+
+options(DT.options = list(
+  bPaginate = TRUE,
+  dom = "Biftlp",
+  language = list(
+    info = "Всего _TOTAL_ записей", 
+    search = "Поиск", 
+    previous = "Предыдущие",
+    paginate = list('next'="Предыдущие", previous="Следующие"),
+    length = "Показать"
+    ),
+    dom = 'Bfrtip'
+))
+
+datatable(pat)
+```
