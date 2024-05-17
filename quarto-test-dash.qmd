@@ -3,6 +3,7 @@ title: "Учебный дашборд"
 author: "Ivan Trushin"
 format: 
   dashboard:
+    output-file: "index"
     # theme: 
     # - cosmo
     # - custom.scss
